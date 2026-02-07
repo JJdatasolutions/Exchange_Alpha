@@ -1,3 +1,5 @@
+streamlit>=1.40.0
+altair<6
 yfinance
 pandas
 numpy
@@ -7,7 +9,4 @@ requests
 lxml
 html5lib
 bs4
-streamlit
 plotly
-pandas
-supabase
