@@ -6,7 +6,7 @@ from supabase import create_client, Client
 from datetime import timedelta
 
 # ==========================================
-# 1. CONFIGURATIE & FORCE DARK CSS
+# 1. CONFIGURATIE & DESIGN (STEALTH DARK)
 # ==========================================
 st.set_page_config(
     page_title="AlphaTrader Pro", 
@@ -16,49 +16,56 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    /* 1. FORCEER DONKERE ACHTERGROND VOOR DE HELE APP */
+    /* Main Dark Theme */
     .stApp {
         background-color: #0E1117;
         color: #E0E0E0;
     }
     
-    /* 2. INPUT VELDEN (ZOEKBALK) FIX - WIT OP WIT VERHELPEN */
+    /* Input Fields Styling (Fix voor wit-op-wit) */
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] {
-        background-color: #262730 !important;
+        background-color: #1F2937 !important; /* Donkergrijs */
         color: white !important;
-        border-color: #444 !important;
+        border: 1px solid #374151 !important;
     }
     div[data-baseweb="select"] span {
         color: white !important;
     }
-    /* De dropdown lijst zelf */
     ul[data-baseweb="menu"] {
-        background-color: #262730 !important;
+        background-color: #1F2937 !important;
     }
     
-    /* 3. METRICS STYLING */
+    /* Metrics */
     [data-testid="stMetricValue"] {
-        font-size: 1.3rem !important;
-        color: #00CC96 !important;
+        font-size: 1.4rem !important;
+        color: #00CC96 !important; /* Emerald Green */
     }
     [data-testid="stMetricLabel"] {
-        color: #A0A0A0 !important;
+        color: #9CA3AF !important; /* Muted Grey */
     }
 
-    /* 4. TABS STYLING */
+    /* Tabs */
     .stTabs [data-baseweb="tab-list"] {
         background-color: transparent;
+        gap: 8px;
     }
     .stTabs [data-baseweb="tab"] {
         background-color: #1F2937;
-        color: #D1D5DB;
+        color: #9CA3AF;
+        border-radius: 4px;
         border: none;
-        margin-right: 5px;
+        padding: 8px 16px;
     }
     .stTabs [aria-selected="true"] {
         background-color: #374151 !important;
         color: #00CC96 !important;
+        font-weight: bold;
+    }
+    
+    /* Plotly Chart Background Fix */
+    .js-plotly-plot .plotly .main-svg {
+        background-color: rgba(0,0,0,0) !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -68,11 +75,11 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 except FileNotFoundError:
-    st.error("Geen secrets gevonden.")
+    st.error("Secrets missing.")
     st.stop()
 
 # ==========================================
-# 2. DATA LADEN & VOORBEREIDEN
+# 2. DATA
 # ==========================================
 @st.cache_data(ttl=600)
 def load_data():
@@ -81,12 +88,8 @@ def load_data():
         all_rows = []
         start = 0
         batch_size = 1000
-        
         while True:
-            response = supabase.table('stock_predictions')\
-                .select("*")\
-                .range(start, start + batch_size - 1)\
-                .execute()
+            response = supabase.table('stock_predictions').select("*").range(start, start + batch_size - 1).execute()
             rows = response.data
             if not rows: break
             all_rows.extend(rows)
@@ -94,63 +97,35 @@ def load_data():
             start += batch_size
 
         if not all_rows: return pd.DataFrame()
-
         df = pd.DataFrame(all_rows)
         df.columns = df.columns.str.lower()
         
-        # Datums
+        # Datum afhandeling
         col = 'run_date' if 'run_date' in df.columns else 'date'
         if col in df.columns:
             df['run_date'] = pd.to_datetime(df[col])
             df = df.sort_values(['ticker', 'run_date'])
-            
-            # BEREKEN DAGELIJKSE PROCENTUELE VERANDERING (Voor de grafiek)
+            # Dagwinst berekenen voor de tooltip
             df['daily_pct'] = df.groupby('ticker')['price'].pct_change() * 100
         
         return df
     except Exception as e:
-        st.error(f"Data error: {e}")
+        st.error(f"Error: {e}")
         return pd.DataFrame()
 
 data = load_data()
 
 # Header
-col_logo, col_info = st.columns([2, 1])
-with col_logo:
-    st.title("🚀 AlphaTrader Pro")
-with col_info:
+c1, c2 = st.columns([3, 1])
+with c1: st.title("🚀 AlphaTrader Pro")
+with c2: 
     if not data.empty:
-        last_dt = data['run_date'].max().strftime('%d-%m')
-        st.markdown(f"<div style='text-align:right; color:#888; font-size:0.8rem; margin-top:10px;'>Data: {last_dt}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align:right; color:#666; font-size:0.8em; padding-top:10px;'>Update: {data['run_date'].max().strftime('%d-%m')}</div>", unsafe_allow_html=True)
 
-if data.empty:
-    st.warning("Geen data.")
-    st.stop()
+if data.empty: st.stop()
 
 # ==========================================
-# 3. HELPER: DARK TABLE STYLING
-# ==========================================
-def style_dark_table(df_input):
-    """
-    Past styling toe op een dataframe zodat hij zwart/grijs is 
-    in plaats van standaard wit.
-    """
-    return df_input.style.format({
-        "Prijs": "{:.2f}", 
-        "Start": "{:.2f}",
-        "Alpha": "{:.2f}", 
-        "Conf": "{:.0f}%",
-        "Conf%": "{:.0f}%",
-        "Winst": "{:.2f}%"
-    }).set_properties(**{
-        'background-color': '#262730',  # Donkergrijze cellen
-        'color': '#E0E0E0',             # Witte tekst
-        'border-color': '#444'
-    }).background_gradient(subset=['Winst'], cmap='Greens', vmin=0, vmax=20)\
-      .background_gradient(subset=['Alpha'], cmap='cool', vmin=1, vmax=5)
-
-# ==========================================
-# 4. LOGICA
+# 3. LOGICA & VISUALISATIES
 # ==========================================
 def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
     if alpha_col not in df.columns: return pd.DataFrame()
@@ -174,7 +149,6 @@ def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
             status = "🆕"
             
         pct = ((max_px - start_px) / start_px) * 100
-        
         results.append({
             "Sym": ticker,
             "Datum": start_dt.strftime('%d-%m'),
@@ -187,48 +161,111 @@ def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
         })
     return pd.DataFrame(results)
 
+# --- STYLE FUNCTION (ZACHTE KLEUREN) ---
+def apply_table_style(df_input):
+    return df_input.style.format({
+        "Prijs": "{:.2f}", "Start": "{:.2f}",
+        "Alpha": "{:.2f}", "Conf": "{:.0f}%", "Conf%": "{:.0f}%",
+        "Winst": "{:.1f}%"
+    }).set_properties(**{
+        'background-color': '#1F2937',  # Dark Grey Cells
+        'color': '#E5E7EB',             # White/Grey Text
+        'border-color': '#374151'       # Subtle Borders
+    })\
+    .background_gradient(subset=['Winst'], cmap='Greens', vmin=0, vmax=25)\
+    .background_gradient(subset=['Alpha'], cmap='Purples', vmin=0.5, vmax=4.0) # <--- HIER: ZACHT PAARS
+
+# --- VIOLIN PLOT (SPREIDING & GEMIDDELDE) ---
+def plot_distribution(df_in, title_suffix):
+    if df_in.empty: return
+    
+    # Statistieken
+    avg_gain = df_in['Winst'].mean()
+    median_gain = df_in['Winst'].median()
+    
+    # 1. KPI Cards (Terug van weggeweest)
+    k1, k2 = st.columns(2)
+    k1.metric(f"Gem. Winst ({title_suffix})", f"{avg_gain:.2f}%")
+    k2.metric("Mediaan", f"{median_gain:.2f}%")
+
+    # 2. De Violin Plot
+    fig = go.Figure()
+    
+    fig.add_trace(go.Violin(
+        x=df_in['Winst'],
+        box_visible=True,       # Toont de boxplot in de viool (voor kwartielen)
+        meanline_visible=True,  # Toont het gemiddelde streepje
+        line_color='#00CC96',   # Emerald Green lijn
+        fillcolor='rgba(0, 204, 150, 0.2)', # Transparante vulling
+        opacity=0.8,
+        orientation='h',        # Horizontaal leest fijner op mobiel
+        name="Verdeling",
+        hoverinfo='x'
+    ))
+
+    fig.update_layout(
+        template="plotly_dark",
+        height=200,             # Compact houden
+        margin=dict(l=20, r=20, t=30, b=20),
+        title=dict(text="Winst Spreiding (Risk/Reward)", font=dict(size=14, color="#AAA")),
+        xaxis=dict(title="Winst %", showgrid=True, gridcolor='#333'),
+        yaxis=dict(showticklabels=False), # Geen y-as labels nodig voor 1 viool
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
 # ==========================================
-# 5. TABELLEN (NU DARK MODE)
+# 4. VIEW: TABS & TABLES
 # ==========================================
 st.markdown("### 📡 Market Scanner")
-tab1, tab2, tab3 = st.tabs(["🔥 Nu Actief", "⚡ Historie 2W", "🔮 Historie 4W"])
+tab_act, tab_2w, tab_4w = st.tabs(["🔥 Nu Actief", "⚡ Historie 2W", "🔮 Historie 4W"])
 
-with tab1:
+# TAB 1: Actief
+with tab_act:
     latest = data['run_date'].max()
     mask_rec = data['run_date'] >= (latest - timedelta(days=3))
     mask_sig = (data['confidence_2w'] > 70) & (data['alpha_2w_norm'] > 1.0)
     active = data[mask_rec & mask_sig].copy()
     
     if not active.empty:
+        st.info(f"Signalen van {latest.strftime('%d-%m')}")
         disp = active[['ticker', 'price', 'alpha_2w_norm', 'confidence_2w']]
         disp.columns = ['Sym', 'Prijs', 'Alpha', 'Conf%']
         
-        # Pas de DARK STYLE toe
         st.dataframe(
-            style_dark_table(disp).map(lambda x: 'background-color: #262730; color: white'), 
+            apply_table_style(disp), 
             use_container_width=True, hide_index=True
         )
     else:
-        st.caption("Geen breakouts.")
+        st.caption("Geen signalen op de laatste datum.")
 
-with tab2:
+# TAB 2: Historie 2W
+with tab_2w:
     df2 = get_sweet_spots(data, 21, 'alpha_2w_norm', 'confidence_2w')
     if not df2.empty:
+        plot_distribution(df2, "2W") # <--- VIOLIN PLOT HIER
+        
         df2 = df2.sort_values('raw_date', ascending=False)
         cols = ['Sym', 'Datum', 'Start', 'Winst', 'Alpha', 'Conf', 'Stat']
         st.dataframe(
-            style_dark_table(df2[cols]), 
+            apply_table_style(df2[cols]), 
             use_container_width=True, hide_index=True, height=300
         )
     else: st.info("Geen data")
 
-with tab3:
+# TAB 3: Historie 4W
+with tab_4w:
     df4 = get_sweet_spots(data, 28, 'alpha_4w_norm', 'confidence_4w')
     if not df4.empty:
+        plot_distribution(df4, "4W") # <--- VIOLIN PLOT HIER
+        
         df4 = df4.sort_values('raw_date', ascending=False)
         cols = ['Sym', 'Datum', 'Start', 'Winst', 'Alpha', 'Conf', 'Stat']
         st.dataframe(
-            style_dark_table(df4[cols]), 
+            apply_table_style(df4[cols]), 
             use_container_width=True, hide_index=True, height=300
         )
     else: st.info("Geen data")
@@ -236,12 +273,11 @@ with tab3:
 st.divider()
 
 # ==========================================
-# 6. CHART (DYNAMISCHE AS + HOVER %)
+# 5. CHART & ANALYSE
 # ==========================================
 st.markdown("### 🔎 Deep Dive")
 
 tickers = sorted(data['ticker'].unique())
-# Selectbox zou nu donker moeten zijn door de CSS bovenaan
 selected = st.selectbox("Zoek Aandeel:", tickers, index=0)
 
 if selected:
@@ -254,70 +290,45 @@ if selected:
     k3.metric("Conf 2W", f"{last['confidence_2w']:.0f}%")
     k4.metric("Conf 4W", f"{last['confidence_4w']:.0f}%")
 
-    # --- BEREKEN Y-AS RANGE ---
-    # We nemen de min en max van de prijs en voegen 2% margin toe
-    min_price = subset['price'].min()
-    max_price = subset['price'].max()
-    y_padding = (max_price - min_price) * 0.1 # 10% padding
-    if y_padding == 0: y_padding = 1
-    
-    y_range = [min_price - y_padding, max_price + y_padding]
+    # Y-Range berekening (Dynamische zoom)
+    min_px, max_px = subset['price'].min(), subset['price'].max()
+    pad = (max_px - min_px) * 0.05
+    if pad == 0: pad = 0.5
+    y_range = [min_px - pad, max_px + pad]
 
-    # --- MAAK CHART ---
+    # Tooltip tekst
+    subset['hov'] = subset.apply(lambda x: f"Datum: {x['run_date'].strftime('%d-%m')}<br>Prijs: {x['price']:.2f}<br>Dag: {'🟢' if x['daily_pct']>=0 else '🔴'} {x['daily_pct']:.2f}%", axis=1)
+
     fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.1,
-        row_heights=[0.6, 0.4],
-        specs=[[{"secondary_y": False}], [{"secondary_y": True}]]
+        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+        row_heights=[0.6, 0.4], specs=[[{"secondary_y": False}], [{"secondary_y": True}]]
     )
 
-    # 1. PRIJS LIJN (Met Hover Info)
-    # We maken een aangepaste hover tekst
-    subset['hover_text'] = subset.apply(
-        lambda x: f"Datum: {x['run_date'].strftime('%d-%m')}<br>Prijs: {x['price']:.2f}<br>Dagwinst: {'🟢' if x['daily_pct'] >= 0 else '🔴'} {x['daily_pct']:.2f}%", 
-        axis=1
-    )
-
+    # Boven: Prijs
     fig.add_trace(go.Scatter(
-        x=subset['run_date'], y=subset['price'],
-        name="Prijs",
-        line=dict(color='#00CC96', width=2),
-        fill='tozeroy',
-        fillcolor='rgba(0, 204, 150, 0.1)',
-        text=subset['hover_text'], # <--- HIER ZIT DE MAGIC
-        hoverinfo='text'           # Forceer onze eigen tekst
+        x=subset['run_date'], y=subset['price'], name="Prijs",
+        line=dict(color='#00CC96', width=2), fill='tozeroy', fillcolor='rgba(0, 204, 150, 0.1)',
+        text=subset['hov'], hoverinfo='text'
     ), row=1, col=1)
 
-    # 2. SIGNALEN
-    fig.add_trace(go.Scatter(x=subset['run_date'], y=subset['alpha_2w_norm'], name="Alpha 2W", line=dict(color='#26C6DA', width=2)), row=2, col=1)
-    fig.add_trace(go.Scatter(x=subset['run_date'], y=subset['alpha_4w_norm'], name="Alpha 4W", line=dict(color='#AB47BC', width=2)), row=2, col=1)
+    # Onder: Signalen
+    # Alpha (Links - Paars/Blauw)
+    fig.add_trace(go.Scatter(x=subset['run_date'], y=subset['alpha_2w_norm'], name="Alpha 2W", line=dict(color='#8B5CF6', width=2)), row=2, col=1)
+    fig.add_trace(go.Scatter(x=subset['run_date'], y=subset['alpha_4w_norm'], name="Alpha 4W", line=dict(color='#C4B5FD', width=2)), row=2, col=1)
     
-    fig.add_trace(go.Scatter(x=subset['run_date'], y=subset['confidence_2w'], name="Conf 2W", line=dict(color='#FF7043', width=1, dash='dot')), row=2, col=1, secondary_y=True)
-    fig.add_trace(go.Scatter(x=subset['run_date'], y=subset['confidence_4w'], name="Conf 4W", line=dict(color='#FFA726', width=1, dash='dot')), row=2, col=1, secondary_y=True)
+    # Conf (Rechts - Rood/Oranje)
+    fig.add_trace(go.Scatter(x=subset['run_date'], y=subset['confidence_2w'], name="Conf 2W", line=dict(color='#F87171', width=1, dash='dot')), row=2, col=1, secondary_y=True)
+    fig.add_trace(go.Scatter(x=subset['run_date'], y=subset['confidence_4w'], name="Conf 4W", line=dict(color='#FBBF24', width=1, dash='dot')), row=2, col=1, secondary_y=True)
 
-    # LAYOUT
     fig.update_layout(
-        template="plotly_dark",
-        height=500,
-        margin=dict(l=10, r=10, t=10, b=10),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        legend=dict(orientation="h", y=1.05, x=0, font=dict(color="#AAA")),
-        hovermode="x unified"
+        template="plotly_dark", height=500, margin=dict(l=10, r=10, t=10, b=10),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        hovermode="x unified", legend=dict(orientation="h", y=1.02, x=0)
     )
     
-    # ASSEN CONFIGURATIE (DYNAMISCH!)
-    # Hier zetten we de berekende range
-    fig.update_yaxes(
-        range=y_range, # <--- DIT FIKST HET "PLATTE LIJN" PROBLEEM
-        title="Prijs", row=1, col=1, 
-        showgrid=True, gridcolor='#333', color='#BBB'
-    )
-    
-    fig.update_yaxes(title="Alpha", row=2, col=1, showgrid=True, gridcolor='#333', color='#26C6DA', secondary_y=False)
-    fig.update_yaxes(title="Conf", row=2, col=1, showgrid=False, color='#FF7043', secondary_y=True, range=[0,105])
-    
-    fig.update_xaxes(showgrid=True, gridcolor='#333', color='#BBB')
+    # Assen
+    fig.update_yaxes(range=y_range, row=1, col=1, gridcolor='#333', color='#AAA')
+    fig.update_yaxes(title="Alpha", row=2, col=1, gridcolor='#333', color='#8B5CF6', secondary_y=False)
+    fig.update_yaxes(title="Conf", row=2, col=1, showgrid=False, color='#F87171', secondary_y=True, range=[0,105])
 
     st.plotly_chart(fig, use_container_width=True)
