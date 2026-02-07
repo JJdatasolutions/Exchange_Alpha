@@ -1,5 +1,6 @@
 streamlit>=1.40.0
 altair<6
+matplotlib
 yfinance
 pandas
 numpy
