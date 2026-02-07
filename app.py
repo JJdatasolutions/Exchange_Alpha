@@ -19,31 +19,56 @@ except FileNotFoundError:
 
 @st.cache_data(ttl=600)
 def load_data():
+    """
+    Haalt ALLE data op uit Supabase door middel van pagination (in blokjes van 1000).
+    """
     try:
         supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
         
-        # 1. Haal data op
-        response = supabase.table('stock_predictions').select("*").execute()
+        all_rows = []
+        start = 0
+        batch_size = 1000  # Supabase limiet is vaak 1000 per keer
         
-        if not response.data:
+        # We blijven loopen totdat we geen data meer terugkrijgen
+        while True:
+            response = supabase.table('stock_predictions')\
+                .select("*")\
+                .range(start, start + batch_size - 1)\
+                .execute()
+            
+            rows = response.data
+            
+            # Als er geen data meer is, stop de loop
+            if not rows:
+                break
+            
+            all_rows.extend(rows)
+            
+            # Als we minder rijen kregen dan de batch size, zijn we klaar
+            if len(rows) < batch_size:
+                break
+                
+            # Voorbereiden voor volgende batch
+            start += batch_size
+
+        if not all_rows:
             return pd.DataFrame()
 
-        df = pd.DataFrame(response.data)
+        df = pd.DataFrame(all_rows)
 
         # 2. Zet ALLE kolomnamen om naar kleine letters (Forceer lowercase)
         df.columns = df.columns.str.lower()
         
-        # 3. Check of 'run_date' nu bestaat
+        # 3. Check of 'run_date' nu bestaat en converteer
         if 'run_date' in df.columns:
             df['run_date'] = pd.to_datetime(df['run_date'])
             df = df.sort_values('run_date')
         else:
-            # Fallback: probeer 'date' of 'created_at' als run_date mist
+            # Fallback
             if 'date' in df.columns:
                 df['run_date'] = pd.to_datetime(df['date'])
                 df = df.sort_values('run_date')
             else:
-                st.error("Kolom 'run_date' ontbreekt in de database.")
                 return pd.DataFrame()
         
         return df
@@ -52,12 +77,16 @@ def load_data():
         st.error(f"Fout bij laden data: {e}")
         return pd.DataFrame()
 
+# Laad de data (dit kan nu iets langer duren omdat hij 20x moet verversen op de achtergrond)
 data = load_data()
 
 st.title("🎯 Sweet Spot Monitor")
 
+# Debug info (optioneel, haal dit weg als je het storend vindt)
+st.caption(f"Totaal aantal rijen ingeladen: {len(data)}")
+
 if data.empty:
-    st.warning("Nog geen data gevonden in Supabase. Wacht op de eerste run.")
+    st.warning("Nog geen data gevonden in Supabase.")
     st.stop()
 
 # ==========================================
@@ -66,7 +95,7 @@ if data.empty:
 def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
     results = []
     
-    # Veiligheidscheck: bestaan de kolommen?
+    # Veiligheidscheck
     if alpha_col not in df.columns or conf_col not in df.columns:
         return pd.DataFrame()
 
@@ -116,7 +145,7 @@ def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
     return pd.DataFrame(results)
 
 # ==========================================
-# 3. VISUALISATIE (GRAFIEK)
+# 3. VISUALISATIE (PASTEL GRAFIEK 🎨)
 # ==========================================
 st.subheader("🔎 Analyse per Aandeel")
 
@@ -124,35 +153,38 @@ unique_tickers = data['ticker'].unique()
 ticker = st.selectbox("Selecteer aandeel:", unique_tickers)
 
 if ticker:
-    # Forceer ticker naar string om fouten te voorkomen
     ticker_str = str(ticker)
     subset = data[data['ticker'] == ticker]
     
     fig = go.Figure()
 
-    # Linker Y-As
+    # Linker Y-As (Alpha - Blauw/Turquoise Pastels)
     fig.add_trace(go.Scatter(
         x=subset['run_date'], y=subset['alpha_2w_norm'],
-        name='Alpha 2W', line=dict(color='blue', width=2)
+        name='Alpha 2W', 
+        line=dict(color='#5D9CEC', width=2)  # Pastel Blauw
     ))
     fig.add_trace(go.Scatter(
         x=subset['run_date'], y=subset['alpha_4w_norm'],
-        name='Alpha 4W', line=dict(color='cyan', width=2)
+        name='Alpha 4W', 
+        line=dict(color='#4FC1E9', width=2)  # Pastel Turquoise
     ))
 
-    # Rechter Y-As
+    # Rechter Y-As (Confidence - Rood/Oranje Pastels)
     fig.add_trace(go.Scatter(
         x=subset['run_date'], y=subset['confidence_2w'],
-        name='Conf 2W', line=dict(color='red', width=2, dash='dot'),
+        name='Conf 2W', 
+        line=dict(color='#ED5565', width=2, dash='dot'), # Pastel Rood/Zalm
         yaxis='y2'
     ))
     fig.add_trace(go.Scatter(
         x=subset['run_date'], y=subset['confidence_4w'],
-        name='Conf 4W', line=dict(color='orange', width=2, dash='dot'),
+        name='Conf 4W', 
+        line=dict(color='#FC6E51', width=2, dash='dot'), # Pastel Oranje
         yaxis='y2'
     ))
 
-    # Layout Update (VEILIGE MODERNE SYNTAX)
+    # Layout Update (VEILIGE SYNTAX)
     fig.update_layout(
         title=f"Signaalverloop {ticker_str}",
         xaxis_title="Datum",
@@ -160,16 +192,22 @@ if ticker:
         legend=dict(orientation="h", y=1.1, x=0),
         # Y-as Links (Alpha)
         yaxis=dict(
-            title=dict(text="Alpha Norm", font=dict(color="blue")),
-            tickfont=dict(color="blue")
+            title=dict(text="Alpha Norm", font=dict(color="#5D9CEC")),
+            tickfont=dict(color="#5D9CEC")
         ),
         # Y-as Rechts (Confidence)
         yaxis2=dict(
-            title=dict(text="Confidence (%)", font=dict(color="red")),
-            tickfont=dict(color="red"),
+            title=dict(text="Confidence (%)", font=dict(color="#ED5565")),
+            tickfont=dict(color="#ED5565"),
             overlaying="y",
             side="right",
             range=[0, 100]
+        ),
+        # Achtergrond wit maken voor frisse look
+        plot_bgcolor='rgba(255, 255, 255, 1)',
+        paper_bgcolor='rgba(255, 255, 255, 1)',
+        xaxis=dict(
+            showgrid=True, gridcolor='#F0F2F6' # Heel lichtgrijs raster
         )
     )
     
