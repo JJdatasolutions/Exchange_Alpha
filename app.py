@@ -30,17 +30,21 @@ def load_data():
 
         df = pd.DataFrame(response.data)
 
-        # 2. KRITIEK: Zet ALLE kolomnamen om naar kleine letters
-        # Dit lost het probleem op dat 'Run_Date' niet gevonden wordt.
+        # 2. Zet ALLE kolomnamen om naar kleine letters (Forceer lowercase)
         df.columns = df.columns.str.lower()
         
-        # 3. Check of 'run_date' nu bestaat (na lowercasing)
+        # 3. Check of 'run_date' nu bestaat
         if 'run_date' in df.columns:
             df['run_date'] = pd.to_datetime(df['run_date'])
             df = df.sort_values('run_date')
         else:
-            st.error("Kolom 'run_date' (of Run_Date) ontbreekt in de database.")
-            return pd.DataFrame()
+            # Fallback: probeer 'date' of 'created_at' als run_date mist
+            if 'date' in df.columns:
+                df['run_date'] = pd.to_datetime(df['date'])
+                df = df.sort_values('run_date')
+            else:
+                st.error("Kolom 'run_date' ontbreekt in de database.")
+                return pd.DataFrame()
         
         return df
 
@@ -62,7 +66,7 @@ if data.empty:
 def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
     results = []
     
-    # Zorg dat we zeker weten dat de kolommen bestaan
+    # Veiligheidscheck: bestaan de kolommen?
     if alpha_col not in df.columns or conf_col not in df.columns:
         return pd.DataFrame()
 
@@ -120,7 +124,7 @@ unique_tickers = data['ticker'].unique()
 ticker = st.selectbox("Selecteer aandeel:", unique_tickers)
 
 if ticker:
-    # Zorg dat ticker een string is voor de titel
+    # Forceer ticker naar string om fouten te voorkomen
     ticker_str = str(ticker)
     subset = data[data['ticker'] == ticker]
     
@@ -148,30 +152,25 @@ if ticker:
         yaxis='y2'
     ))
 
-    # Layout Update (VEILIGE VERSIE)
-    # We gebruiken de expliciete dictionary structuur om fouten te voorkomen
+    # Layout Update (VEILIGE MODERNE SYNTAX)
     fig.update_layout(
-        title=dict(text=f"Signaalverloop {ticker_str}"),
-        xaxis=dict(title="Datum"),
+        title=f"Signaalverloop {ticker_str}",
+        xaxis_title="Datum",
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.1, x=0),
+        # Y-as Links (Alpha)
         yaxis=dict(
-            title="Alpha Norm",
-            titlefont=dict(color="blue"),
+            title=dict(text="Alpha Norm", font=dict(color="blue")),
             tickfont=dict(color="blue")
         ),
+        # Y-as Rechts (Confidence)
         yaxis2=dict(
-            title="Confidence (%)",
-            titlefont=dict(color="red"),
+            title=dict(text="Confidence (%)", font=dict(color="red")),
             tickfont=dict(color="red"),
             overlaying="y",
             side="right",
             range=[0, 100]
-        ),
-        legend=dict(
-            orientation="h",
-            y=1.1,
-            x=0
-        ),
-        hovermode="x unified"
+        )
     )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -187,7 +186,6 @@ col1, col2 = st.columns(2)
 # --- TABEL 1 ---
 with col1:
     st.markdown("### ⚡ Sweet Spot: 2 Weken")
-    # Let op: we gebruiken nu de kleine letters (alpha_2w_norm) omdat we df.columns.str.lower() deden
     df_2w = get_sweet_spots(data, lookahead_days=21, alpha_col='alpha_2w_norm', conf_col='confidence_2w')
     
     if not df_2w.empty:
