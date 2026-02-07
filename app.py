@@ -6,7 +6,7 @@ from supabase import create_client, Client
 from datetime import timedelta
 
 # ==========================================
-# 1. CONFIGURATIE & DARK MODE STYLING
+# 1. CONFIGURATIE & DESIGN SYSTEM
 # ==========================================
 st.set_page_config(
     page_title="AlphaTrader Pro", 
@@ -14,42 +14,56 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS voor een strakke Dark Mode look
+# Custom CSS voor betere integratie van tabellen in Dark Mode
 st.markdown("""
     <style>
-    /* Algemene achtergrond donker maken (als Streamlit niet in dark mode staat) */
+    /* Algemene achtergrond fix */
     .stApp {
         background-color: #0E1117;
-        color: #FAFAFA;
     }
     
-    /* Metrics (KPI's) strakker maken */
+    /* Headers en tekst kleur */
+    h1, h2, h3, p, div, span {
+        color: #FAFAFA !important;
+    }
+    
+    /* Metrics stylen (Grote getallen) */
     [data-testid="stMetricValue"] {
-        font-size: 1.5rem !important;
-        color: #00CC96 !important; /* Cyber Green */
+        font-size: 1.4rem !important;
+        color: #00CC96 !important; /* Emerald */
     }
     [data-testid="stMetricLabel"] {
-        color: #979797 !important;
+        color: #A0A0A0 !important; /* Grijs */
     }
     
-    /* Tabs styling */
+    /* Tabs: Donkere achtergrond en accenten */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
+        gap: 8px;
+        background-color: #0E1117;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        background-color: #1E1E1E;
-        border-radius: 5px;
-        color: white;
+        height: 45px;
+        background-color: #1F2937; /* Donkergrijs blokje */
+        border-radius: 4px;
+        color: #D1D5DB;
+        border: none;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #00CC96 !important;
-        color: black !important;
+        background-color: #374151 !important; /* Iets lichter bij selectie */
+        color: #00CC96 !important;
+        border-bottom: 2px solid #00CC96;
+    }
+    
+    /* DataFrame aanpassingen om het witte vlak te verminderen */
+    [data-testid="stDataFrame"] {
+        background-color: #1F2937;
+        border-radius: 8px;
+        padding: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# Secrets
+# Secrets ophalen
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -58,7 +72,7 @@ except FileNotFoundError:
     st.stop()
 
 # ==========================================
-# 2. DATA LADEN
+# 2. DATA LADEN (ROBUUST)
 # ==========================================
 @st.cache_data(ttl=600)
 def load_data():
@@ -84,7 +98,7 @@ def load_data():
         df = pd.DataFrame(all_rows)
         df.columns = df.columns.str.lower()
         
-        # Datum correctie
+        # Datum check
         col = 'run_date' if 'run_date' in df.columns else 'date'
         if col in df.columns:
             df['run_date'] = pd.to_datetime(df[col])
@@ -97,30 +111,26 @@ def load_data():
 
 data = load_data()
 
-# Header Area
-if not data.empty:
-    last_date = data['run_date'].max()
-    last_date_str = last_date.strftime('%d %B')
-else:
-    last_date_str = "..."
-
-col_logo, col_info = st.columns([2, 1])
+# Header
+col_logo, col_info = st.columns([3, 1])
 with col_logo:
     st.title("🚀 AlphaTrader Pro")
 with col_info:
-    st.markdown(f"<div style='text-align: right; color: gray;'>Laatste Data: {last_date_str}</div>", unsafe_allow_html=True)
+    if not data.empty:
+        last_dt = data['run_date'].max().strftime('%d-%m')
+        st.markdown(f"<div style='text-align:right; color:#888;'>Data: {last_dt}</div>", unsafe_allow_html=True)
 
 if data.empty:
-    st.warning("Geen data beschikbaar.")
+    st.warning("Geen data.")
     st.stop()
 
 # ==========================================
-# 3. REKENLOGICA (HISTORIE & ACTIEF)
+# 3. REKENLOGICA (MET ALLE KOLOMMEN)
 # ==========================================
 def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
     if alpha_col not in df.columns: return pd.DataFrame()
 
-    # Filter op sterke signalen
+    # Filter
     signals = df[(df[conf_col] > 70) & (df[alpha_col] > 1)].copy()
     results = []
     
@@ -135,169 +145,188 @@ def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
         if not future.empty:
             max_px = future['price'].max()
             days = (future['run_date'].max() - start_dt).days
-            status = "🏁 Klaar" if days >= lookahead_days else f"⏳ {days}d"
+            status = "🏁" if days >= lookahead_days else f"⏳{days}d"
         else:
             max_px = start_px
-            status = "🆕 Nieuw"
+            status = "🆕"
             
         pct = ((max_px - start_px) / start_px) * 100
+        
         results.append({
             "Sym": ticker,
             "Datum": start_dt.strftime('%d-%m'),
             "Start": start_px,
             "Winst": pct,
-            "Conf": row[conf_col],
-            "Alpha": row[alpha_col],
-            "Status": status,
-            "raw_date": start_dt # Voor sorteren
+            "Conf": row[conf_col],       # TERUG TOEGEVOEGD
+            "Alpha": row[alpha_col],     # TERUG TOEGEVOEGD
+            "Stat": status,
+            "raw_date": start_dt
         })
     return pd.DataFrame(results)
 
 # ==========================================
-# 4. VIEW: HOT PICKS & HISTORIE
+# 4. VIEW: TABELLEN
 # ==========================================
 st.markdown("### 📡 Market Scanner")
 
-# Tabs
-tab_active, tab_hist_2w, tab_hist_4w = st.tabs(["🔥 Actieve Signalen", "⚡ Historie (2W)", "🔮 Historie (4W)"])
+tab_active, tab_hist_2w, tab_hist_4w = st.tabs(["🔥 Nu Actief", "⚡ Historie 2W", "🔮 Historie 4W"])
 
-# --- TAB 1: ACTIEVE SIGNALEN (DE BREAKOUT KANSHEBBERS) ---
+# --- TAB 1: NU ACTIEF ---
 with tab_active:
-    # We kijken naar signalen van de LAATSTE datumbeschikbaar in de dataset
     latest_date = data['run_date'].max()
-    # Filter: Datum is recent (laatste 3 dagen voor weekend effect) EN goede signalen
+    # Pak laatste 3 dagen (voor weekend correctie)
     mask_recent = data['run_date'] >= (latest_date - timedelta(days=3))
     mask_signal = (data['confidence_2w'] > 70) & (data['alpha_2w_norm'] > 1.0)
     
-    active_df = data[mask_recent & mask_signal].copy()
+    active = data[mask_recent & mask_signal].copy()
     
-    if not active_df.empty:
-        st.info(f"Deze aandelen gaven een koopsignaal op {latest_date.strftime('%d-%m')}.")
-        # Toon tabel
-        display_cols = active_df[['ticker', 'price', 'alpha_2w_norm', 'confidence_2w']]
-        display_cols.columns = ['Symbool', 'Prijs', 'Alpha', 'Conf %']
+    if not active.empty:
+        st.info(f"Signalen van {latest_date.strftime('%d-%m')}")
+        disp = active[['ticker', 'price', 'alpha_2w_norm', 'confidence_2w']]
+        disp.columns = ['Sym', 'Prijs', 'Alpha', 'Conf%']
         
         st.dataframe(
-            display_cols.style.format({
-                "Prijs": "{:.2f}", "Alpha": "{:.2f}", "Conf %": "{:.0f}%"
-            }).background_gradient(subset=['Alpha'], cmap='cool'), # Cool = blauw/paars
+            disp.style.format({
+                "Prijs": "{:.2f}", "Alpha": "{:.2f}", "Conf%": "{:.0f}%"
+            }).background_gradient(subset=['Alpha'], cmap='cool'),
             use_container_width=True, hide_index=True
         )
     else:
-        st.write("Geen actieve breakouts gevonden op de laatste datum.")
+        st.caption("Geen breakouts op de laatste handelsdag.")
 
-# --- TAB 2 & 3: HISTORISCHE PERFORMANCE ---
-def show_history_tab(tab, df_res):
+# --- TAB 2 & 3: HISTORIE ---
+def show_history_table(tab, df_res):
     with tab:
         if not df_res.empty:
-            # 2. KPI: GEMIDDELDE WINST (TERUG VAN WEGGEWEEST)
-            avg_gain = df_res['Winst'].mean()
-            col_kpi, _ = st.columns([1,3])
-            col_kpi.metric("Gem. Max Rendement", f"{avg_gain:.2f}%")
+            avg = df_res['Winst'].mean()
+            col_kpi, _ = st.columns([2,3])
+            col_kpi.metric("Gem. Potentieel", f"{avg:.2f}%")
             
-            # Sorteer op datum (nieuwste eerst)
             df_res = df_res.sort_values('raw_date', ascending=False)
             
+            # Selecteer kolommen inclusief Conf en Alpha
+            cols = ['Sym', 'Datum', 'Start', 'Alpha', 'Conf', 'Winst', 'Stat']
+            
             st.dataframe(
-                df_res[['Sym', 'Datum', 'Start', 'Winst', 'Status']].style.format({
-                    "Start": "{:.2f}", "Winst": "{:.1f}%"
+                df_res[cols].style.format({
+                    "Start": "{:.2f}", 
+                    "Alpha": "{:.2f}", 
+                    "Conf": "{:.0f}%", 
+                    "Winst": "{:.1f}%"
                 }).background_gradient(subset=['Winst'], cmap='Greens'),
-                use_container_width=True, hide_index=True, height=300
+                use_container_width=True, hide_index=True, height=350
             )
         else:
-            st.info("Geen historische signalen.")
+            st.info("Geen historie.")
 
-df_2w = get_sweet_spots(data, 21, 'alpha_2w_norm', 'confidence_2w')
-df_4w = get_sweet_spots(data, 28, 'alpha_4w_norm', 'confidence_4w')
+df2 = get_sweet_spots(data, 21, 'alpha_2w_norm', 'confidence_2w')
+df4 = get_sweet_spots(data, 28, 'alpha_4w_norm', 'confidence_4w')
 
-show_history_tab(tab_hist_2w, df_2w)
-show_history_tab(tab_hist_4w, df_4w)
+show_history_table(tab_hist_2w, df2)
+show_history_table(tab_hist_4w, df4)
 
 st.divider()
 
 # ==========================================
-# 5. DIEPGAANDE ANALYSE (DARK CHART)
+# 5. DIEPGAANDE ANALYSE (CHART DESIGN)
 # ==========================================
 st.markdown("### 🔎 Deep Dive")
 
 tickers = sorted(data['ticker'].unique())
-selected = st.selectbox("Selecteer Aandeel:", tickers, index=0)
+selected = st.selectbox("Zoek Aandeel:", tickers, index=0)
 
 if selected:
     subset = data[data['ticker'] == selected]
     last = subset.iloc[-1]
     
-    # KPI Cards boven grafiek
+    # KPI Cards
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Prijs", f"{last['price']:.2f}")
-    k2.metric("Alpha 2W", f"{last['alpha_2w_norm']:.2f}", delta_color="off")
-    k3.metric("Conf 2W", f"{last['confidence_2w']:.0f}%", delta_color="off")
-    k4.metric("Conf 4W", f"{last['confidence_4w']:.0f}%", delta_color="off")
+    k2.metric("Alpha 2W", f"{last['alpha_2w_norm']:.2f}")
+    k3.metric("Conf 2W", f"{last['confidence_2w']:.0f}%")
+    k4.metric("Conf 4W", f"{last['confidence_4w']:.0f}%")
 
-    # --- DARK MODE CHART MET 4 LIJNEN ---
+    # --- CHART: DARK MODE & LEESBAARHEID ---
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.1,
-        row_heights=[0.5, 0.5],
+        row_heights=[0.55, 0.45],
         specs=[[{"secondary_y": False}], [{"secondary_y": True}]]
     )
 
-    # 1. Prijs (Boven) - Area Chart
+    # 1. PRIJS (Boven)
     fig.add_trace(go.Scatter(
         x=subset['run_date'], y=subset['price'],
         name="Prijs",
-        line=dict(color='#00CC96', width=2), # Cyber Green
+        line=dict(color='#00CC96', width=2), # Emerald Green
         fill='tozeroy',
-        fillcolor='rgba(0, 204, 150, 0.1)'
+        fillcolor='rgba(0, 204, 150, 0.1)' # Zeer lichte groene gloed
     ), row=1, col=1)
 
-    # 2. Signalen (Onder) - 4 LIJNEN
+    # 2. SIGNALEN (Onder) - 4 LIJNEN
     
-    # Alpha lijnen (Linker As)
+    # Alpha (Linker as)
     fig.add_trace(go.Scatter(
         x=subset['run_date'], y=subset['alpha_2w_norm'],
         name="Alpha 2W",
-        line=dict(color='#00F2EA', width=2) # Neon Cyaan
+        line=dict(color='#26C6DA', width=2) # Cyaan
     ), row=2, col=1, secondary_y=False)
     
     fig.add_trace(go.Scatter(
         x=subset['run_date'], y=subset['alpha_4w_norm'],
         name="Alpha 4W",
-        line=dict(color='#B300FF', width=2) # Neon Paars
+        line=dict(color='#AB47BC', width=2) # Paars
     ), row=2, col=1, secondary_y=False)
 
-    # Confidence lijnen (Rechter As)
+    # Confidence (Rechter as)
     fig.add_trace(go.Scatter(
         x=subset['run_date'], y=subset['confidence_2w'],
         name="Conf 2W",
-        line=dict(color='#FF0055', width=1, dash='dot') # Neon Rood
+        line=dict(color='#FF7043', width=1, dash='dot') # Coral
     ), row=2, col=1, secondary_y=True)
 
     fig.add_trace(go.Scatter(
         x=subset['run_date'], y=subset['confidence_4w'],
         name="Conf 4W",
-        line=dict(color='#FFAA00', width=1, dash='dot') # Neon Oranje
+        line=dict(color='#FFA726', width=1, dash='dot') # Oranje
     ), row=2, col=1, secondary_y=True)
 
-    # Layout Styling (DARK MODE)
+    # LAYOUT STYLING VOOR DARK MODE
     fig.update_layout(
-        template="plotly_dark", # <--- DIT DOET HET ZWARE WERK
+        template="plotly_dark", # Basis dark theme
         height=500,
         margin=dict(l=10, r=10, t=30, b=10),
+        
+        # Achtergrond transparant maken zodat het blendt met de app
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        
+        # Legende styling (Wit/Grijs)
         legend=dict(
-            orientation="h",
-            y=1.1,
-            x=0
+            orientation="h", y=1.1, x=0,
+            font=dict(color="#E0E0E0")
         ),
-        hovermode="x unified",
-        paper_bgcolor='rgba(0,0,0,0)', # Transparant zodat CSS erdoor komt
-        plot_bgcolor='rgba(0,0,0,0)'
+        hovermode="x unified"
     )
     
-    # Assen configureren
-    fig.update_yaxes(title="Prijs", row=1, col=1, showgrid=True, gridcolor='#333')
-    fig.update_yaxes(title="Alpha", row=2, col=1, showgrid=True, gridcolor='#333', secondary_y=False)
-    fig.update_yaxes(title="Conf %", row=2, col=1, showgrid=False, secondary_y=True, range=[0,100])
+    # Assen Styling (Zichtbaar maken op donkere achtergrond)
+    grid_col = "#333333" # Donkergrijs raster
+    text_col = "#B0B0B0" # Lichtgrijze tekst
+    
+    # Bovenste grafiek (Prijs)
+    fig.update_yaxes(title="Prijs", row=1, col=1, 
+                     showgrid=True, gridcolor=grid_col, color=text_col)
+    
+    # Onderste grafiek (Linker as = Alpha)
+    fig.update_yaxes(title="Alpha", row=2, col=1, secondary_y=False,
+                     showgrid=True, gridcolor=grid_col, color="#26C6DA") # Cyaan tekst
+    
+    # Onderste grafiek (Rechter as = Conf)
+    fig.update_yaxes(title="Conf %", row=2, col=1, secondary_y=True,
+                     showgrid=False, range=[0,105], color="#FF7043") # Coral tekst
+    
+    # X-as
+    fig.update_xaxes(showgrid=True, gridcolor=grid_col, color=text_col)
 
     st.plotly_chart(fig, use_container_width=True)
