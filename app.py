@@ -1,111 +1,124 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from supabase import create_client, Client
 from datetime import timedelta
 
 # ==========================================
-# 1. CONFIGURATIE & SETUP
+# 1. CONFIGURATIE & CSS (STYLING)
 # ==========================================
-st.set_page_config(page_title="Stock Sweet Spots", layout="wide")
+st.set_page_config(
+    page_title="AlphaTrader Mobile", 
+    layout="wide",
+    initial_sidebar_state="collapsed" # Meer ruimte op mobiel
+)
+
+# Custom CSS voor een 'App-like' ervaring
+st.markdown("""
+    <style>
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 5rem;
+    }
+    h1 {
+        font-size: 1.8rem !important;
+        margin-bottom: 0rem;
+    }
+    h3 {
+        font-size: 1.2rem !important;
+        margin-top: 1rem;
+    }
+    /* Maak metrics mooier op mobiel */
+    [data-testid="stMetricValue"] {
+        font-size: 1.2rem !important;
+    }
+    /* Tabs iets groter maken voor touch */
+    button[data-baseweb="tab"] {
+        font-size: 1rem;
+        padding: 10px;
+        flex: 1; /* Tabs vullen de breedte */
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # Secrets ophalen
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 except FileNotFoundError:
-    st.error("Geen secrets gevonden. Stel SUPABASE_URL en SUPABASE_KEY in.")
+    st.error("Geen secrets gevonden.")
     st.stop()
 
 @st.cache_data(ttl=600)
 def load_data():
-    """
-    Haalt ALLE data op uit Supabase door middel van pagination (in blokjes van 1000).
-    """
+    """ Haalt ALLE data op (met pagination loop) """
     try:
         supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        
         all_rows = []
         start = 0
-        batch_size = 1000  # Supabase limiet is vaak 1000 per keer
+        batch_size = 1000
         
-        # We blijven loopen totdat we geen data meer terugkrijgen
         while True:
             response = supabase.table('stock_predictions')\
                 .select("*")\
                 .range(start, start + batch_size - 1)\
                 .execute()
-            
             rows = response.data
-            
-            # Als er geen data meer is, stop de loop
-            if not rows:
-                break
-            
+            if not rows: break
             all_rows.extend(rows)
-            
-            # Als we minder rijen kregen dan de batch size, zijn we klaar
-            if len(rows) < batch_size:
-                break
-                
-            # Voorbereiden voor volgende batch
+            if len(rows) < batch_size: break
             start += batch_size
 
-        if not all_rows:
-            return pd.DataFrame()
+        if not all_rows: return pd.DataFrame()
 
         df = pd.DataFrame(all_rows)
-
-        # 2. Zet ALLE kolomnamen om naar kleine letters (Forceer lowercase)
         df.columns = df.columns.str.lower()
         
-        # 3. Check of 'run_date' nu bestaat en converteer
         if 'run_date' in df.columns:
             df['run_date'] = pd.to_datetime(df['run_date'])
             df = df.sort_values('run_date')
+        elif 'date' in df.columns:
+            df['run_date'] = pd.to_datetime(df['date'])
+            df = df.sort_values('run_date')
         else:
-            # Fallback
-            if 'date' in df.columns:
-                df['run_date'] = pd.to_datetime(df['date'])
-                df = df.sort_values('run_date')
-            else:
-                return pd.DataFrame()
+            return pd.DataFrame()
         
         return df
-
     except Exception as e:
-        st.error(f"Fout bij laden data: {e}")
+        st.error(f"Fout: {e}")
         return pd.DataFrame()
 
-# Laad de data (dit kan nu iets langer duren omdat hij 20x moet verversen op de achtergrond)
 data = load_data()
 
-st.title("🎯 Sweet Spot Monitor")
-
-# Debug info (optioneel, haal dit weg als je het storend vindt)
-st.caption(f"Totaal aantal rijen ingeladen: {len(data)}")
+# Header
+col_h1, col_h2 = st.columns([3, 1])
+with col_h1:
+    st.title("🚀 AlphaTrader")
+with col_h2:
+    if not data.empty:
+        last_date = data['run_date'].max().strftime('%d-%m')
+        st.caption(f"Update: {last_date}")
 
 if data.empty:
-    st.warning("Nog geen data gevonden in Supabase.")
+    st.warning("Wachten op data...")
     st.stop()
 
 # ==========================================
-# 2. REKENFUNCTIE (DE LOGICA)
+# 2. LOGICA (SWEET SPOTS)
 # ==========================================
 def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
-    results = []
-    
-    # Veiligheidscheck
     if alpha_col not in df.columns or conf_col not in df.columns:
         return pd.DataFrame()
 
+    # Filter signalen
     signals = df[(df[conf_col] > 70) & (df[alpha_col] > 1)].copy()
+    results = []
     
     for idx, row in signals.iterrows():
         ticker = row['ticker']
         start_date = row['run_date']
         start_price = row['price']
-        
         end_date = start_date + timedelta(days=lookahead_days)
         
         future_mask = (
@@ -116,151 +129,141 @@ def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
         future_data = df[future_mask]
         
         if not future_data.empty:
-            max_price_seen = future_data['price'].max()
-            days_data_available = (future_data['run_date'].max() - start_date).days
+            max_price = future_data['price'].max()
+            days = (future_data['run_date'].max() - start_date).days
+            status = "🏁 Klaar" if days >= lookahead_days else f"⏳ {days}d"
         else:
-            max_price_seen = start_price
-            days_data_available = 0
-            
-        pct_diff = ((max_price_seen - start_price) / start_price) * 100
-        
-        if days_data_available >= lookahead_days:
-            status = "🏁 Voltooid"
-        elif days_data_available == 0:
+            max_price = start_price
             status = "🆕 Nieuw"
-        else:
-            status = f"⏳ Dag {days_data_available}/{lookahead_days}"
-
+            
+        pct = ((max_price - start_price) / start_price) * 100
         results.append({
-            "Datum": start_date.strftime('%Y-%m-%d'),
             "Ticker": ticker,
-            "Prijs (Start)": start_price,
-            "Conf": row[conf_col],
-            "Alpha": row[alpha_col],
-            "Max Prijs (Tot nu)": max_price_seen,
-            "Winst %": pct_diff,
+            "Datum": start_date.strftime('%d-%m'),
+            "Start": start_price,
+            "Max": max_price,
+            "Winst": pct,
             "Status": status
         })
-        
+    
     return pd.DataFrame(results)
 
 # ==========================================
-# 3. VISUALISATIE (PASTEL GRAFIEK 🎨)
+# 3. UI DEEL A: DE TABELLEN (BOVENAAN)
 # ==========================================
-st.subheader("🔎 Analyse per Aandeel")
+st.markdown("### 🏆 Top Picks")
 
-unique_tickers = data['ticker'].unique()
-ticker = st.selectbox("Selecteer aandeel:", unique_tickers)
+# Tabs werken perfect op mobiel
+tab1, tab2 = st.tabs(["⚡ 2 Weken", "🔮 4 Weken"])
 
-if ticker:
-    ticker_str = str(ticker)
-    subset = data[data['ticker'] == ticker]
-    
-    fig = go.Figure()
+def show_table(tab, df_res):
+    with tab:
+        if not df_res.empty:
+            avg = df_res['Winst'].mean()
+            st.caption(f"Gem. Potentieel: **{avg:.2f}%**")
+            
+            # Mooiere tabel voor mobiel: minder kolommen, strakke formatting
+            st.dataframe(
+                df_res[['Ticker', 'Datum', 'Start', 'Winst', 'Status']].style.format({
+                    "Start": "{:.2f}",
+                    "Winst": "{:.2f}%"
+                }).background_gradient(subset=['Winst'], cmap='Greens'),
+                use_container_width=True,
+                hide_index=True,
+                height=300 # Scrollable container
+            )
+        else:
+            st.info("Geen signalen.")
 
-    # Linker Y-As (Alpha - Blauw/Turquoise Pastels)
-    fig.add_trace(go.Scatter(
-        x=subset['run_date'], y=subset['alpha_2w_norm'],
-        name='Alpha 2W', 
-        line=dict(color='#5D9CEC', width=2)  # Pastel Blauw
-    ))
-    fig.add_trace(go.Scatter(
-        x=subset['run_date'], y=subset['alpha_4w_norm'],
-        name='Alpha 4W', 
-        line=dict(color='#4FC1E9', width=2)  # Pastel Turquoise
-    ))
+df_2w = get_sweet_spots(data, 21, 'alpha_2w_norm', 'confidence_2w')
+df_4w = get_sweet_spots(data, 28, 'alpha_4w_norm', 'confidence_4w')
 
-    # Rechter Y-As (Confidence - Rood/Oranje Pastels)
-    fig.add_trace(go.Scatter(
-        x=subset['run_date'], y=subset['confidence_2w'],
-        name='Conf 2W', 
-        line=dict(color='#ED5565', width=2, dash='dot'), # Pastel Rood/Zalm
-        yaxis='y2'
-    ))
-    fig.add_trace(go.Scatter(
-        x=subset['run_date'], y=subset['confidence_4w'],
-        name='Conf 4W', 
-        line=dict(color='#FC6E51', width=2, dash='dot'), # Pastel Oranje
-        yaxis='y2'
-    ))
-
-    # Layout Update (VEILIGE SYNTAX)
-    fig.update_layout(
-        title=f"Signaalverloop {ticker_str}",
-        xaxis_title="Datum",
-        hovermode="x unified",
-        legend=dict(orientation="h", y=1.1, x=0),
-        # Y-as Links (Alpha)
-        yaxis=dict(
-            title=dict(text="Alpha Norm", font=dict(color="#5D9CEC")),
-            tickfont=dict(color="#5D9CEC")
-        ),
-        # Y-as Rechts (Confidence)
-        yaxis2=dict(
-            title=dict(text="Confidence (%)", font=dict(color="#ED5565")),
-            tickfont=dict(color="#ED5565"),
-            overlaying="y",
-            side="right",
-            range=[0, 100]
-        ),
-        # Achtergrond wit maken voor frisse look
-        plot_bgcolor='rgba(255, 255, 255, 1)',
-        paper_bgcolor='rgba(255, 255, 255, 1)',
-        xaxis=dict(
-            showgrid=True, gridcolor='#F0F2F6' # Heel lichtgrijs raster
-        )
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
+show_table(tab1, df_2w)
+show_table(tab2, df_4w)
 
 st.divider()
 
 # ==========================================
-# 4. DE TABELLEN
+# 4. UI DEEL B: CHART & ZOEKFUNCTIE
 # ==========================================
+st.markdown("### 🔎 Analyse")
 
-col1, col2 = st.columns(2)
+# 1. Zoekfunctie (Alfabetisch gesorteerd)
+tickers = sorted(data['ticker'].unique())
+# Tip: Zet een index=None zodat hij leeg begint, of kies een default
+default_idx = 0 if tickers else None
+selected_ticker = st.selectbox("Zoek aandeel:", tickers, index=default_idx)
 
-# --- TABEL 1 ---
-with col1:
-    st.markdown("### ⚡ Sweet Spot: 2 Weken")
-    df_2w = get_sweet_spots(data, lookahead_days=21, alpha_col='alpha_2w_norm', conf_col='confidence_2w')
+if selected_ticker:
+    subset = data[data['ticker'] == selected_ticker]
+    last_row = subset.iloc[-1]
     
-    if not df_2w.empty:
-        avg_gain = df_2w['Winst %'].mean()
-        st.metric("Gemiddelde Max Winst", f"{avg_gain:.2f}%")
-        st.dataframe(
-            df_2w.style.format({
-                "Prijs (Start)": "{:.2f}",
-                "Max Prijs (Tot nu)": "{:.2f}",
-                "Conf": "{:.1f}%",
-                "Alpha": "{:.2f}",
-                "Winst %": "{:.2f}%"
-            }).background_gradient(subset=['Winst %'], cmap='Greens'),
-            use_container_width=True,
-            hide_index=True
-        )
-    else:
-        st.info("Geen signalen gevonden.")
+    # 2. KPI Cards (Huidige status)
+    kpi1, kpi2, kpi3 = st.columns(3)
+    kpi1.metric("Prijs", f"{last_row['price']:.2f}")
+    kpi2.metric("Alpha 2W", f"{last_row['alpha_2w_norm']:.2f}")
+    kpi3.metric("Conf 2W", f"{last_row['confidence_2w']:.0f}%")
 
-# --- TABEL 2 ---
-with col2:
-    st.markdown("### 🔮 Sweet Spot: 4 Weken")
-    df_4w = get_sweet_spots(data, lookahead_days=28, alpha_col='alpha_4w_norm', conf_col='confidence_4w')
+    # 3. De Chart (Subplot: Prijs boven, Signaal onder)
+    fig = make_subplots(
+        rows=2, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.05,
+        row_heights=[0.5, 0.5], # 50% prijs, 50% signalen
+        subplot_titles=(f"Prijsverloop {selected_ticker}", "AI Signalen")
+    )
+
+    # --- PANEL 1: PRIJS (Area Chart) ---
+    fig.add_trace(go.Scatter(
+        x=subset['run_date'], y=subset['price'],
+        name="Prijs",
+        fill='tozeroy', # Vult de ruimte onder de lijn
+        line=dict(color='#10B981', width=1), # Modern groen
+        fillcolor='rgba(16, 185, 129, 0.1)' # Transparant groen
+    ), row=1, col=1)
+
+    # --- PANEL 2: SIGNALEN (Pastel lijnen) ---
+    # Alpha (Links)
+    fig.add_trace(go.Scatter(
+        x=subset['run_date'], y=subset['alpha_2w_norm'],
+        name='Alpha 2W', line=dict(color='#5D9CEC', width=2) # Pastel Blauw
+    ), row=2, col=1)
     
-    if not df_4w.empty:
-        avg_gain = df_4w['Winst %'].mean()
-        st.metric("Gemiddelde Max Winst", f"{avg_gain:.2f}%")
-        st.dataframe(
-            df_4w.style.format({
-                "Prijs (Start)": "{:.2f}",
-                "Max Prijs (Tot nu)": "{:.2f}",
-                "Conf": "{:.1f}%",
-                "Alpha": "{:.2f}",
-                "Winst %": "{:.2f}%"
-            }).background_gradient(subset=['Winst %'], cmap='Greens'),
-            use_container_width=True,
-            hide_index=True
+    # Conf (Rechts - via secundaire y-as truc in subplot)
+    # Let op: Subplots met dubbele as zijn complex, we houden Conf en Alpha 
+    # hier even op 1 as OF we normaliseren ze.
+    # Beter voor mobiel leesbaarheid: Zet Conf als stippellijn erbij, 
+    # maar we weten dat schaal anders is. 
+    # TRUC: We zetten Conf op een 2e Y-as in de 2e rij.
+    
+    fig.add_trace(go.Scatter(
+        x=subset['run_date'], y=subset['confidence_2w'],
+        name='Conf 2W', line=dict(color='#ED5565', width=2, dash='dot') # Pastel Rood
+    ), row=2, col=1, secondary_y=True)
+
+    # Layout tuning voor mobiel
+    fig.update_layout(
+        height=500, # Niet te hoog op mobiel
+        margin=dict(l=10, r=10, t=30, b=10),
+        hovermode="x unified",
+        showlegend=False, # Legende neemt ruimte in, hover is beter
+        plot_bgcolor='rgba(255,255,255,1)',
+        paper_bgcolor='rgba(255,255,255,1)',
+    )
+    
+    # Assen netjes maken
+    fig.update_yaxes(title_text="Prijs", row=1, col=1, showgrid=True, gridcolor='#F0F2F6')
+    fig.update_yaxes(title_text="Alpha", row=2, col=1, showgrid=True, gridcolor='#F0F2F6')
+    
+    # We moeten de tweede y-as voor rij 2 handmatig toevoegen in layout
+    fig.update_layout(
+        yaxis3=dict(
+            anchor="x", overlaying="y2", side="right", 
+            title="Conf %", range=[0, 100], 
+            showgrid=False, title_font=dict(color="#ED5565"), tickfont=dict(color="#ED5565")
         )
-    else:
-        st.info("Geen signalen gevonden.")
+    )
+    # Koppel de Conf trace aan deze yaxis3 (Plotly quirks)
+    fig.data[2].update(yaxis="y3")
+
+    st.plotly_chart(fig, use_container_width=True)
