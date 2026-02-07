@@ -9,17 +9,21 @@ from datetime import timedelta
 # ==========================================
 st.set_page_config(page_title="Stock Sweet Spots", layout="wide")
 
-# VUL HIER JE GEGEVENS IN
-SUPABASE_URL = "https://ibffbjlvibkisbzecfkn.supabase.co"
-# Let op: Gebruik hier je SERVICE_ROLE key of ANON key. 
-# Voor alleen lezen is ANON vaak genoeg, maar service_role mag altijd.
-SUPABASE_KEY = "PLAK_HIER_JE_KEY" 
+# We halen de secrets veilig op uit Streamlit Cloud instellingen
+# Als je lokaal test, maakt hij een bestand .streamlit/secrets.toml nodig,
+# of je vult ze hieronder tijdelijk hard in (maar niet committen naar GitHub!).
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+except FileNotFoundError:
+    st.error("Geen secrets gevonden. Stel SUPABASE_URL en SUPABASE_KEY in.")
+    st.stop()
 
 @st.cache_data(ttl=600) # Cache de data voor 10 minuten
 def load_data():
     try:
         supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        # We halen alle rows op. Later kun je hier een .limit() op zetten als het traag wordt.
+        # Haal alle data op
         response = supabase.table('stock_predictions').select("*").execute()
         df = pd.DataFrame(response.data)
         
@@ -63,7 +67,9 @@ def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
         # De periode waarin we zoeken naar een hogere prijs
         end_date = start_date + timedelta(days=lookahead_days)
         
-        # Haal data op van dit aandeel, NA de signaal datum, maar VOOR de einddatum
+        # Haal data op van dit aandeel:
+        # - NA de signaal datum
+        # - MAAR VOOR (of op) de einddatum
         future_mask = (
             (df['ticker'] == ticker) & 
             (df['run_date'] > start_date) & 
@@ -76,13 +82,13 @@ def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
             max_price_seen = future_data['price'].max()
             days_data_available = (future_data['run_date'].max() - start_date).days
         else:
-            # Nog geen data van morgen beschikbaar
+            # Nog geen data na het signaal (bijv. signaal was gisteren)
             max_price_seen = start_price
             days_data_available = 0
             
         pct_diff = ((max_price_seen - start_price) / start_price) * 100
         
-        # Status bepalen
+        # Status bepalen voor de gebruiker
         if days_data_available >= lookahead_days:
             status = "🏁 Voltooid"
         elif days_data_available == 0:
@@ -108,16 +114,16 @@ def get_sweet_spots(df, lookahead_days, alpha_col, conf_col):
 # ==========================================
 st.subheader("🔎 Analyse per Aandeel")
 
-# Selectbox
+# Selectbox met alle beschikbare tickers
 unique_tickers = data['ticker'].unique()
-ticker = st.selectbox("Selecteer aandeel", unique_tickers)
+ticker = st.selectbox("Selecteer aandeel om te analyseren:", unique_tickers)
 
 if ticker:
     subset = data[data['ticker'] == ticker]
     
     fig = go.Figure()
 
-    # Linker Y-As: Alpha (Lijnen)
+    # Linker Y-As: Alpha (Volle Lijnen)
     fig.add_trace(go.Scatter(
         x=subset['run_date'], y=subset['alpha_2w_norm'],
         name='Alpha Norm 2W', line=dict(color='blue', width=2)
@@ -165,22 +171,25 @@ if ticker:
 st.divider()
 
 # ==========================================
-# 4. DE TABELLEN
+# 4. DE TABELLEN (SWEET SPOTS)
 # ==========================================
 
 col1, col2 = st.columns(2)
 
-# --- TABEL 1: 2 WEKEN PREDICTIE (Kijk 3 weken / 21 dagen vooruit) ---
+# --- TABEL 1: 2 WEKEN PREDICTIE (Kijk 21 dagen vooruit) ---
 with col1:
     st.markdown("### ⚡ Sweet Spot: 2 Weken")
     st.markdown("*Max prijs in de **3 weken** (21 dagen) na signaal*")
     
+    # Hier roepen we de functie aan met lookahead=21
     df_2w = get_sweet_spots(data, lookahead_days=21, alpha_col='alpha_2w_norm', conf_col='confidence_2w')
     
     if not df_2w.empty:
+        # Bereken gemiddelde winst van de lijst
         avg_gain = df_2w['Winst %'].mean()
         st.metric("Gemiddelde 'Max Winst' van signalen", f"{avg_gain:.2f}%")
         
+        # Toon tabel met kleuren
         st.dataframe(
             df_2w.style.format({
                 "Prijs (Start)": "{:.2f}",
@@ -195,11 +204,12 @@ with col1:
     else:
         st.info("Geen signalen gevonden (Alpha > 1 & Conf > 70).")
 
-# --- TABEL 2: 4 WEKEN PREDICTIE (Kijk 4 weken / 28 dagen vooruit) ---
+# --- TABEL 2: 4 WEKEN PREDICTIE (Kijk 28 dagen vooruit) ---
 with col2:
     st.markdown("### 🔮 Sweet Spot: 4 Weken")
     st.markdown("*Max prijs in de **4 weken** (28 dagen) na signaal*")
     
+    # Hier roepen we de functie aan met lookahead=28
     df_4w = get_sweet_spots(data, lookahead_days=28, alpha_col='alpha_4w_norm', conf_col='confidence_4w')
     
     if not df_4w.empty:
