@@ -19,23 +19,37 @@ except FileNotFoundError:
     st.error("Geen secrets gevonden. Stel SUPABASE_URL en SUPABASE_KEY in.")
     st.stop()
 
-@st.cache_data(ttl=600) # Cache de data voor 10 minuten
+@st.cache_data(ttl=600)
 def load_data():
     try:
+        # Maak verbinding
         supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        # Haal alle data op
-        response = supabase.table('stock_predictions').select("*").execute()
-        df = pd.DataFrame(response.data)
         
-        if df.empty:
+        # Haal data op
+        response = supabase.table('stock_predictions').select("*").execute()
+        
+        # Check of de lijst leeg is
+        if not response.data:
             return pd.DataFrame()
 
-        # Datums correct zetten
-        df['run_date'] = pd.to_datetime(df['run_date'])
-        df = df.sort_values('run_date')
+        # Maak dataframe
+        df = pd.DataFrame(response.data)
+
+        # --- DE OPLOSSING ---
+        # We zetten ALLE kolomnamen om naar kleine letters.
+        # Dus: 'Run_Date' wordt 'run_date', 'Ticker' wordt 'ticker', etc.
+        df.columns = df.columns.str.lower()
+        # --------------------
+
+        # Nu kunnen we veilig verder met kleine letters
+        if 'run_date' in df.columns:
+            df['run_date'] = pd.to_datetime(df['run_date'])
+            df = df.sort_values('run_date')
+        
         return df
+
     except Exception as e:
-        st.error(f"Fout bij verbinden met Supabase: {e}")
+        st.error(f"Er ging iets mis: {e}")
         return pd.DataFrame()
 
 data = load_data()
