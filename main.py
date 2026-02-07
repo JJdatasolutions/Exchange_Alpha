@@ -14,14 +14,10 @@ warnings.filterwarnings("ignore")
 # ==========================================
 # CONFIG & SUPABASE SETUP
 # ==========================================
-# Jouw specifieke URL is hier ingevuld:
 SUPABASE_URL = "https://ibffbjlvibkisbzecfkn.supabase.co"
-
-# De Key haalt hij uit de GitHub Secrets (die jij zo gaat instellen)
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 if not SUPABASE_KEY:
-    # Fallback voor lokaal testen als je de key niet in je env vars hebt
     print("LET OP: Geen SUPABASE_KEY gevonden in environment variables.")
     exit()
 
