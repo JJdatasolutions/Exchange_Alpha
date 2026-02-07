@@ -38,7 +38,7 @@ st.markdown("""
     
     /* Metrics */
     [data-testid="stMetricValue"] {
-        font-size: 1.4rem !important;
+        font-size: 1.3rem !important;
         color: #00CC96 !important; /* Emerald Green */
     }
     [data-testid="stMetricLabel"] {
@@ -173,43 +173,42 @@ def apply_table_style(df_input):
         'border-color': '#374151'       # Subtle Borders
     })\
     .background_gradient(subset=['Winst'], cmap='Greens', vmin=0, vmax=25)\
-    .background_gradient(subset=['Alpha'], cmap='Purples', vmin=0.5, vmax=4.0) # <--- HIER: ZACHT PAARS
+    .background_gradient(subset=['Alpha'], cmap='Purples', vmin=0.5, vmax=4.0)
 
-# --- VIOLIN PLOT (SPREIDING & GEMIDDELDE) ---
+# --- BOXPLOT (CLEAN & ZAKELIJK) ---
 def plot_distribution(df_in, title_suffix):
     if df_in.empty: return
     
     # Statistieken
     avg_gain = df_in['Winst'].mean()
     median_gain = df_in['Winst'].median()
+    max_gain = df_in['Winst'].max()
     
-    # 1. KPI Cards (Terug van weggeweest)
-    k1, k2 = st.columns(2)
-    k1.metric(f"Gem. Winst ({title_suffix})", f"{avg_gain:.2f}%")
+    # KPI Cards
+    k1, k2, k3 = st.columns(3)
+    k1.metric(f"Gem. Winst", f"{avg_gain:.2f}%")
     k2.metric("Mediaan", f"{median_gain:.2f}%")
+    k3.metric("Max Uitschieter", f"{max_gain:.2f}%")
 
-    # 2. De Violin Plot
+    # De Boxplot
     fig = go.Figure()
     
-    fig.add_trace(go.Violin(
+    fig.add_trace(go.Box(
         x=df_in['Winst'],
-        box_visible=True,       # Toont de boxplot in de viool (voor kwartielen)
-        meanline_visible=True,  # Toont het gemiddelde streepje
-        line_color='#00CC96',   # Emerald Green lijn
-        fillcolor='rgba(0, 204, 150, 0.2)', # Transparante vulling
-        opacity=0.8,
-        orientation='h',        # Horizontaal leest fijner op mobiel
-        name="Verdeling",
-        hoverinfo='x'
+        name='Spreiding',
+        marker_color='#00CC96', # Emerald Green
+        boxmean=True,           # Gestippelde lijn voor gemiddelde
+        orientation='h',        # Horizontaal
+        boxpoints='outliers',   # Alleen uitschieters als punten tonen
+        line=dict(width=1.5)
     ))
 
     fig.update_layout(
         template="plotly_dark",
-        height=200,             # Compact houden
-        margin=dict(l=20, r=20, t=30, b=20),
-        title=dict(text="Winst Spreiding (Risk/Reward)", font=dict(size=14, color="#AAA")),
+        height=150,             # Zeer compact
+        margin=dict(l=10, r=10, t=10, b=20),
         xaxis=dict(title="Winst %", showgrid=True, gridcolor='#333'),
-        yaxis=dict(showticklabels=False), # Geen y-as labels nodig voor 1 viool
+        yaxis=dict(showticklabels=False), # Geen labels op Y-as nodig
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         showlegend=False
@@ -246,7 +245,7 @@ with tab_act:
 with tab_2w:
     df2 = get_sweet_spots(data, 21, 'alpha_2w_norm', 'confidence_2w')
     if not df2.empty:
-        plot_distribution(df2, "2W") # <--- VIOLIN PLOT HIER
+        plot_distribution(df2, "2W")
         
         df2 = df2.sort_values('raw_date', ascending=False)
         cols = ['Sym', 'Datum', 'Start', 'Winst', 'Alpha', 'Conf', 'Stat']
@@ -260,7 +259,7 @@ with tab_2w:
 with tab_4w:
     df4 = get_sweet_spots(data, 28, 'alpha_4w_norm', 'confidence_4w')
     if not df4.empty:
-        plot_distribution(df4, "4W") # <--- VIOLIN PLOT HIER
+        plot_distribution(df4, "4W")
         
         df4 = df4.sort_values('raw_date', ascending=False)
         cols = ['Sym', 'Datum', 'Start', 'Winst', 'Alpha', 'Conf', 'Stat']
@@ -290,7 +289,7 @@ if selected:
     k3.metric("Conf 2W", f"{last['confidence_2w']:.0f}%")
     k4.metric("Conf 4W", f"{last['confidence_4w']:.0f}%")
 
-    # Y-Range berekening (Dynamische zoom)
+    # Y-Range berekening
     min_px, max_px = subset['price'].min(), subset['price'].max()
     pad = (max_px - min_px) * 0.05
     if pad == 0: pad = 0.5
