@@ -179,7 +179,8 @@ def apply_table_style(df_input):
         'props': [('background-color', '#1F2937'), ('color', 'white'), ('border-bottom', '2px solid #374151')]
     }
     
-    return df_input.style.format({
+    # 1. Basis styling
+    styler = df_input.style.format({
         "Prijs": "{:.2f}", "Start": "{:.2f}",
         "Alpha": "{:.2f}", "Conf": "{:.0f}%", "Conf%": "{:.0f}%",
         "Winst": "{:.1f}%"
@@ -187,10 +188,13 @@ def apply_table_style(df_input):
         'background-color': '#1F2937', 
         'color': '#E5E7EB', 
         'border-color': '#374151'
-    })\
-    .set_table_styles([headers])\
-    .background_gradient(subset=['Winst'], cmap='Greens', vmin=0, vmax=25)
-    # GEEN KLEUR MEER OP ALPHA
+    }).set_table_styles([headers])
+    
+    # 2. FIX: Check of 'Winst' bestaat voordat we gradient toepassen
+    if 'Winst' in df_input.columns:
+        styler = styler.background_gradient(subset=['Winst'], cmap='Greens', vmin=0, vmax=25)
+    
+    return styler
 
 # --- STATISCHE BOXPLOT ---
 def plot_distribution(df_in):
