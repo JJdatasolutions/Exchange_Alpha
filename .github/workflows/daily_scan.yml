@@ -2,15 +2,14 @@ name: Daily Stock Prediction
 
 on:
   schedule:
-    # Uitleg:
-    # 0 = minuut 0
-    # 5 = uur 5 (UTC tijd = 06:00 of 07:00 in België)
-    # * = elke dag van de maand
-    # * = elke maand
-    # 1-5 = Maandag t/m Vrijdag (dus NIET in het weekend)
+    # Uitleg Tijd:
+    # 05:00 UTC
+    # = 06:00 in België (Wintertijd)
+    # = 07:00 in België (Zomertijd)
+    # 1-5 = Maandag t/m Vrijdag
     - cron: '0 5 * * 1-5'
   
-  # Zorgt dat je hem nog steeds handmatig kunt starten om te testen
+  # Hiermee kun je hem handmatig starten via de "Run workflow" knop
   workflow_dispatch:
 
 jobs:
@@ -20,18 +19,22 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Install Python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
           cache: 'pip'
 
       - name: Install Dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Run Script
+      - name: Run Analysis Script
         env:
+          # CRUCIAAL: Zorg dat deze 2 ook in je GitHub Repo 'Secrets' staan!
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python main.py
