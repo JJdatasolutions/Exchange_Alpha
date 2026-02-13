@@ -2,6 +2,7 @@ import os
 import sys
 import warnings
 import time
+import json
 from datetime import datetime
 import requests
 import pandas as pd
@@ -239,10 +240,20 @@ def run_engine():
 
     df_scan["signal"] = df_scan.apply(determine_signal, axis=1)
 
-    # Voorbereiden voor upload
-    # Features kolom verwijderen (kan niet in DB) en NaNs fixen
+    # =======================================================
+    # DE OPLOSSING VOOR DE JSON/SUPABASE ERROR
+    # =======================================================
+    # Features kolom verwijderen (kan niet in DB)
     upload_df = df_scan.drop(columns=["features"])
-    upload_data = upload_df.where(pd.notnull(upload_df), None).to_dict(orient='records')
+    
+    # Voorkom errors door infinite waardes te veranderen naar NaN
+    upload_df = upload_df.replace([np.inf, -np.inf], np.nan)
+    
+    # Gebruik Pandas .to_json() om alle numpy types (float64, int64) correct te vertalen
+    # naar native Python types. Dit vertaalt NaN automatisch naar null (None).
+    json_records = upload_df.to_json(orient='records')
+    upload_data = json.loads(json_records)
+    # =======================================================
     
     print(f"☁️ Uploading {len(upload_data)} records naar Supabase...")
     
