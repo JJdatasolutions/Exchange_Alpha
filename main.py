@@ -263,7 +263,7 @@ def run_engine():
     for i in range(0, len(upload_data), batch_size):
         try:
             batch = upload_data[i:i+batch_size]
-            supabase.table('stock_predictions').upsert(batch).execute()
+            supabase.table('stock_predictions').upsert(batch, on_conflict='Run_Date,Ticker').execute()
         except Exception as e:
             print(f"⚠️ Error batch {i}: {e}")
             errors += 1
